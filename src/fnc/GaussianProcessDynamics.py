@@ -1,47 +1,44 @@
 """
-Gaussian Process Dynamics Predictor for Vehicle Dynamics
-Provides uncertainty-aware predictions using Bayesian methods
+Improved Gaussian Process with Better Regularization
+Prevents overfitting on deterministic simulator data
 """
 
 import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel
+from sklearn.gaussian_process.kernels import RBF, WhiteKernel, ConstantKernel, Matern
 import pickle
 import os
 
 class GPDynamicsPredictor:
-    """
-    Gaussian Process-based dynamics predictor
-    Provides predictions AND uncertainty estimates
-    """
+    """Improved Gaussian Process with regularization"""
     def __init__(self, state_dim=6, input_dim=2, noise_level=0.1):
         self.state_dim = state_dim
         self.input_dim = input_dim
         
-        # Storage
         self.all_states = []
         self.all_actions = []
         self.all_next_states = []
         
-        # Normalization
         self.X_mean = None
         self.X_std = None
         
-        # One GP per state dimension
         self.gp_models = []
         
         for i in range(state_dim):
-            kernel = ConstantKernel(1.0) * RBF(length_scale=1.0) + WhiteKernel(noise_level=noise_level)
+            # Improved kernel: Matern is more robust than RBF
+            kernel = (ConstantKernel(1.0, (1e-3, 1e3)) * 
+                     Matern(length_scale=1.0, length_scale_bounds=(1e-2, 1e2), nu=2.5) + 
+                     WhiteKernel(noise_level=noise_level, noise_level_bounds=(1e-3, 1.0)))
             
             gp = GaussianProcessRegressor(
                 kernel=kernel,
-                n_restarts_optimizer=10,
-                alpha=1e-5,
+                n_restarts_optimizer=5,
+                alpha=1e-3,  # Higher regularization
                 normalize_y=True
             )
             self.gp_models.append(gp)
         
-        print(f"✓ Initialized {state_dim} Gaussian Process models")
+        print(f"✓ Initialized {state_dim} GP models (regularized)")
     
     def add_trajectory(self, states, actions):
         """Add trajectory data"""
@@ -50,8 +47,8 @@ class GPDynamicsPredictor:
             self.all_actions.append(actions[t])
             self.all_next_states.append(states[t + 1])
     
-    def train(self, verbose=True):
-        """Train all GPs"""
+    def train(self, verbose=True, use_subset=True, max_samples=1500):
+        """Train with optional subsampling"""
         if len(self.all_states) == 0:
             print("⚠ No training data!")
             return
@@ -59,6 +56,15 @@ class GPDynamicsPredictor:
         states = np.array(self.all_states)
         actions = np.array(self.all_actions)
         next_states = np.array(self.all_next_states)
+        
+        # Use subset to prevent overfitting
+        if use_subset and len(states) > max_samples:
+            indices = np.random.choice(len(states), max_samples, replace=False)
+            states = states[indices]
+            actions = actions[indices]
+            next_states = next_states[indices]
+            if verbose:
+                print(f"Using {max_samples} samples (out of {len(self.all_states)})")
         
         X = np.hstack([states, actions])
         
