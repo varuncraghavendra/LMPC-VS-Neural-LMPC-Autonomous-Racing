@@ -1,51 +1,42 @@
 """
-K-Fold Cross-Validation Dynamics Predictor
-Ensemble learning using multiple Ridge regression models
+Improved K-Fold with Random Forest (Nonlinear!)
+Now uses Random Forest instead of Ridge regression
 """
 
 import numpy as np
 from sklearn.model_selection import KFold
-from sklearn.linear_model import Ridge
+from sklearn.ensemble import RandomForestRegressor
 import pickle
 import os
 
 class KFoldDynamicsPredictor:
-    """
-    K-Fold ensemble predictor
-    Trains K models on different data splits, averages predictions
-    """
+    """K-Fold with Random Forest base models"""
     def __init__(self, state_dim=6, input_dim=2, n_folds=5):
         self.state_dim = state_dim
         self.input_dim = input_dim
         self.n_folds = n_folds
         
-        # Storage for training data
         self.all_states = []
         self.all_actions = []
         self.all_next_states = []
         
-        # Ensemble of models
-        self.fold_models = []  # List of [model1, model2, ..., model6] for each fold
+        self.fold_models = []
         self.fold_scores = []
         
-        # Normalization
         self.X_mean = None
         self.X_std = None
         
-        print(f"✓ Initialized K-Fold predictor (K={n_folds})")
+        print(f"✓ Initialized K-Fold with Random Forest (K={n_folds})")
     
     def add_trajectory(self, states, actions):
-        """Add trajectory data for training"""
+        """Add trajectory data"""
         for t in range(len(states) - 1):
             self.all_states.append(states[t])
             self.all_actions.append(actions[t])
             self.all_next_states.append(states[t + 1])
     
     def train(self, verbose=True):
-        """
-        Train using K-Fold Cross-Validation
-        Creates ensemble of K×6 models
-        """
+        """Train K-Fold with Random Forest"""
         if len(self.all_states) == 0:
             print("⚠ No training data!")
             return
@@ -54,7 +45,6 @@ class KFoldDynamicsPredictor:
         actions = np.array(self.all_actions)
         next_states = np.array(self.all_next_states)
         
-        # Input: [state, action]
         X = np.hstack([states, actions])
         
         # Normalize
@@ -65,8 +55,8 @@ class KFoldDynamicsPredictor:
         X_norm = (X - self.X_mean) / self.X_std
         
         if verbose:
-            print(f"\nK-Fold Cross-Validation Training ({self.n_folds} folds)")
-            print(f"Total samples: {X.shape[0]}")
+            print(f"\nK-Fold CV with Random Forest")
+            print(f"Samples: {X.shape[0]}, Folds: {self.n_folds}")
         
         kfold = KFold(n_splits=self.n_folds, shuffle=True, random_state=42)
         
@@ -82,18 +72,21 @@ class KFoldDynamicsPredictor:
             X_train, X_val = X_norm[train_idx], X_norm[val_idx]
             y_train, y_val = next_states[train_idx], next_states[val_idx]
             
-            # Train one model per output dimension
             models_this_fold = []
             scores_this_fold = []
             
             for state_idx in range(self.state_dim):
-                # Ridge regression with small regularization
-                model = Ridge(alpha=0.1)
+                # Random Forest (NONLINEAR!)
+                model = RandomForestRegressor(
+                    n_estimators=100,
+                    max_depth=15,
+                    min_samples_split=5,
+                    min_samples_leaf=2,
+                    random_state=42,
+                    n_jobs=-1
+                )
                 
-                # Train
                 model.fit(X_train, y_train[:, state_idx])
-                
-                # Validate
                 score = model.score(X_val, y_val[:, state_idx])
                 scores_this_fold.append(score)
                 models_this_fold.append(model)
@@ -109,45 +102,36 @@ class KFoldDynamicsPredictor:
                 print(f"    Average: R²={avg_score:.4f}")
         
         if verbose:
-            overall_avg = np.mean(self.fold_scores)
-            print(f"\n✓ K-Fold training complete!")
-            print(f"  Overall average R²: {overall_avg:.4f}\n")
+            overall = np.mean(self.fold_scores)
+            print(f"\n✓ K-Fold complete! Average R²: {overall:.4f}\n")
     
     def predict(self, state, action, return_std=True):
-        """
-        Predict using ensemble (average across all K folds)
-        Uncertainty from disagreement between folds
-        """
+        """Predict using ensemble"""
         X = np.hstack([state, action]).reshape(1, -1)
         
-        # Normalize
         if self.X_mean is not None:
             X = (X - self.X_mean) / self.X_std
         
-        # Get predictions from all folds
         all_predictions = []
         
         for fold_models in self.fold_models:
             fold_pred = []
-            for state_idx, model in enumerate(fold_models):
+            for model in fold_models:
                 pred = model.predict(X)[0]
                 fold_pred.append(pred)
             all_predictions.append(fold_pred)
         
-        all_predictions = np.array(all_predictions)  # Shape: (n_folds, state_dim)
-        
-        # Average across folds
+        all_predictions = np.array(all_predictions)
         mean_pred = np.mean(all_predictions, axis=0)
         
         if return_std:
-            # Uncertainty = standard deviation across folds
             std_pred = np.std(all_predictions, axis=0)
             return mean_pred, std_pred
         else:
             return mean_pred
     
     def save_model(self, filepath):
-        """Save all fold models"""
+        """Save models"""
         data = {
             'fold_models': self.fold_models,
             'fold_scores': self.fold_scores,
@@ -161,10 +145,10 @@ class KFoldDynamicsPredictor:
         with open(filepath, 'wb') as f:
             pickle.dump(data, f)
         
-        print(f"✓ K-Fold models saved to {filepath}")
+        print(f"✓ K-Fold saved to {filepath}")
     
     def load_model(self, filepath):
-        """Load fold models"""
+        """Load models"""
         if not os.path.exists(filepath):
             print(f"⚠ File not found: {filepath}")
             return
@@ -180,34 +164,4 @@ class KFoldDynamicsPredictor:
         self.X_mean = data.get('X_mean', None)
         self.X_std = data.get('X_std', None)
         
-        print(f"✓ K-Fold models loaded from {filepath}")
-
-
-# Test
-if __name__ == "__main__":
-    print("="*60)
-    print("Testing K-Fold Dynamics Predictor")
-    print("="*60 + "\n")
-    
-    kfold = KFoldDynamicsPredictor(n_folds=5)
-    
-    # Dummy data
-    for traj in range(5):
-        T = 100
-        states = np.random.randn(T, 6) * 0.5
-        actions = np.random.randn(T, 2) * 0.3
-        kfold.add_trajectory(states, actions)
-    
-    kfold.train(verbose=True)
-    
-    # Test
-    test_state = np.array([0.5, 0.1, 0.0, 0.0, 1.0, 0.0])
-    test_action = np.array([0.1, 0.5])
-    
-    mean, std = kfold.predict(test_state, test_action, return_std=True)
-    
-    print(f"\nTest prediction:")
-    print(f"  Mean: {mean}")
-    print(f"  Std:  {std}")
-    
-    print("\n" + "="*60)
+        print(f"✓ K-Fold loaded from {filepath}")
