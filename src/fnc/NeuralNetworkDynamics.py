@@ -1,6 +1,6 @@
 """
-Neural Network Dynamics Model for Vehicle Prediction
-Learns state transitions: x_{k+1} = f(x_k, u_k)
+Improved Neural Network Dynamics Model
+Better architecture, dropout, early stopping, proper validation
 """
 import numpy as np
 import torch
@@ -10,40 +10,49 @@ from torch.utils.data import Dataset, DataLoader
 
 
 class VehicleDynamicsNN(nn.Module):
-    """Neural Network for learning vehicle dynamics"""
-    def __init__(self, state_dim=6, input_dim=2, hidden_dim=128):
+    """Improved Neural Network with regularization"""
+    def __init__(self, state_dim=6, input_dim=2, hidden_dim=256):
         super(VehicleDynamicsNN, self).__init__()
         
         self.state_dim = state_dim
         self.input_dim = input_dim
         
-        # Network architecture
-        self.network = nn.Sequential(
-            nn.Linear(state_dim + input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.LayerNorm(hidden_dim),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, state_dim)
-        )
+        # Improved architecture with dropout
+        self.input_layer = nn.Linear(state_dim + input_dim, hidden_dim)
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.dropout1 = nn.Dropout(0.1)
         
-        # Residual learning (predict change in state)
+        self.hidden1 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim)
+        self.dropout2 = nn.Dropout(0.1)
+        
+        self.hidden2 = nn.Linear(hidden_dim, hidden_dim)
+        self.ln3 = nn.LayerNorm(hidden_dim)
+        self.dropout3 = nn.Dropout(0.1)
+        
+        self.output_layer = nn.Linear(hidden_dim, state_dim)
+        
         self.residual = True
         
     def forward(self, state, action):
-        """
-        Predict next state given current state and action
-        Args:
-            state: (batch, state_dim) - [vx, vy, wz, epsi, s, ey]
-            action: (batch, input_dim) - [steering, acceleration]
-        Returns:
-            next_state: (batch, state_dim)
-        """
         x = torch.cat([state, action], dim=-1)
-        delta = self.network(x)
+        
+        x = self.input_layer(x)
+        x = torch.relu(x)
+        x = self.ln1(x)
+        x = self.dropout1(x)
+        
+        x = self.hidden1(x)
+        x = torch.relu(x)
+        x = self.ln2(x)
+        x = self.dropout2(x)
+        
+        x = self.hidden2(x)
+        x = torch.relu(x)
+        x = self.ln3(x)
+        x = self.dropout3(x)
+        
+        delta = self.output_layer(x)
         
         if self.residual:
             return state + delta
@@ -52,7 +61,7 @@ class VehicleDynamicsNN(nn.Module):
 
 
 class TrajectoryDataset(Dataset):
-    """Dataset for storing trajectory data"""
+    """Dataset for trajectory data"""
     def __init__(self, states, actions, next_states):
         self.states = torch.FloatTensor(states)
         self.actions = torch.FloatTensor(actions)
@@ -66,37 +75,36 @@ class TrajectoryDataset(Dataset):
 
 
 class NNDynamicsPredictor:
-    """Neural Network-based dynamics predictor for LMPC"""
-    def __init__(self, state_dim=6, input_dim=2, hidden_dim=128, 
+    """Improved Neural Network predictor"""
+    def __init__(self, state_dim=6, input_dim=2, hidden_dim=256, 
                  learning_rate=1e-3, device='cpu'):
         self.device = torch.device(device if torch.cuda.is_available() else 'cpu')
         self.model = VehicleDynamicsNN(state_dim, input_dim, hidden_dim).to(self.device)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate)
+        self.optimizer = optim.Adam(self.model.parameters(), lr=learning_rate, weight_decay=1e-4)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, 'min', patience=10, factor=0.5)
         self.criterion = nn.MSELoss()
         
         self.state_dim = state_dim
         self.input_dim = input_dim
         
-        # Storage for training data
         self.all_states = []
         self.all_actions = []
         self.all_next_states = []
         
-        # Normalization statistics
         self.state_mean = None
         self.state_std = None
         self.action_mean = None
         self.action_std = None
         
     def add_trajectory(self, states, actions):
-        """Add trajectory data for training"""
+        """Add trajectory data"""
         for t in range(len(states) - 1):
             self.all_states.append(states[t])
             self.all_actions.append(actions[t])
             self.all_next_states.append(states[t + 1])
     
     def compute_normalization(self):
-        """Compute mean and std for normalization"""
+        """Compute normalization"""
         if len(self.all_states) == 0:
             return
         
@@ -108,49 +116,86 @@ class NNDynamicsPredictor:
         self.action_mean = actions.mean(axis=0)
         self.action_std = actions.std(axis=0) + 1e-6
     
-    def train(self, epochs=100, batch_size=64, verbose=True):
-        """Train the neural network on collected data"""
+    def train(self, epochs=200, batch_size=128, verbose=True):
+        """Train with early stopping and validation"""
         if len(self.all_states) == 0:
-            print("No training data available!")
+            print("No training data!")
             return
         
-        # Compute normalization
         self.compute_normalization()
         
-        # Create dataset
         states = np.array(self.all_states)
         actions = np.array(self.all_actions)
         next_states = np.array(self.all_next_states)
         
-        dataset = TrajectoryDataset(states, actions, next_states)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+        # 90/10 train/val split
+        n_train = int(0.9 * len(states))
+        indices = np.random.permutation(len(states))
+        train_idx = indices[:n_train]
+        val_idx = indices[n_train:]
         
-        # Training loop
-        self.model.train()
+        train_dataset = TrajectoryDataset(states[train_idx], actions[train_idx], next_states[train_idx])
+        val_dataset = TrajectoryDataset(states[val_idx], actions[val_idx], next_states[val_idx])
+        
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+        val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+        
+        best_val_loss = float('inf')
+        patience_counter = 0
+        
         for epoch in range(epochs):
-            total_loss = 0
-            for batch_states, batch_actions, batch_next_states in dataloader:
+            # Training
+            self.model.train()
+            train_loss = 0
+            for batch_states, batch_actions, batch_next_states in train_loader:
                 batch_states = batch_states.to(self.device)
                 batch_actions = batch_actions.to(self.device)
                 batch_next_states = batch_next_states.to(self.device)
                 
-                # Forward pass
-                pred_next_states = self.model(batch_states, batch_actions)
-                loss = self.criterion(pred_next_states, batch_next_states)
+                pred = self.model(batch_states, batch_actions)
+                loss = self.criterion(pred, batch_next_states)
                 
-                # Backward pass
                 self.optimizer.zero_grad()
                 loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
                 
-                total_loss += loss.item()
+                train_loss += loss.item()
             
-            if verbose and (epoch + 1) % 10 == 0:
-                avg_loss = total_loss / len(dataloader)
-                print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.6f}")
+            # Validation
+            self.model.eval()
+            val_loss = 0
+            with torch.no_grad():
+                for batch_states, batch_actions, batch_next_states in val_loader:
+                    batch_states = batch_states.to(self.device)
+                    batch_actions = batch_actions.to(self.device)
+                    batch_next_states = batch_next_states.to(self.device)
+                    
+                    pred = self.model(batch_states, batch_actions)
+                    loss = self.criterion(pred, batch_next_states)
+                    val_loss += loss.item()
+            
+            avg_train_loss = train_loss / len(train_loader)
+            avg_val_loss = val_loss / len(val_loader)
+            
+            self.scheduler.step(avg_val_loss)
+            
+            if avg_val_loss < best_val_loss:
+                best_val_loss = avg_val_loss
+                patience_counter = 0
+            else:
+                patience_counter += 1
+            
+            if verbose and (epoch + 1) % 20 == 0:
+                print(f"Epoch {epoch+1}/{epochs}, Train: {avg_train_loss:.6f}, Val: {avg_val_loss:.6f}")
+            
+            if patience_counter >= 20:
+                if verbose:
+                    print(f"\nEarly stopping at epoch {epoch+1}")
+                break
     
     def predict(self, state, action):
-        """Predict next state given current state and action"""
+        """Predict next state"""
         self.model.eval()
         with torch.no_grad():
             state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
@@ -160,7 +205,7 @@ class NNDynamicsPredictor:
             return pred.cpu().numpy().squeeze()
     
     def save_model(self, filepath):
-        """Save model to file"""
+        """Save model"""
         torch.save({
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
@@ -172,7 +217,7 @@ class NNDynamicsPredictor:
         print(f"✓ Model saved to {filepath}")
     
     def load_model(self, filepath):
-        """Load model from file"""
+        """Load model"""
         checkpoint = torch.load(filepath, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
