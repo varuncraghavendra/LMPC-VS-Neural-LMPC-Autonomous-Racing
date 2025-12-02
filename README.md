@@ -7,7 +7,7 @@ The Learning Model Predictive Control (LMPC) is a data-driven control framework 
 <img src="https://github.com/urosolia/RacingLMPC/blob/master/src/ClosedLoop_multiLap.gif" width="500" />
 </p>
 
-##Abstract
+## Abstract
 
 Autonomous racing presents an extreme and highly dynamic control environment in which a vehicle
 must not only operate at the limits of tire friction and handling capability but must also do so repeatedly
