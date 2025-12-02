@@ -1,4 +1,4 @@
-# Learning Model Predictive Control (LMPC) for autonomous racing
+# ML Model Comparison for Autonomous Vehicle Dynamics
 
 The Learning Model Predictive Control (LMPC) is a data-driven control framework developed at UCB in the MPC lab. In this example, we implemented the LMPC for the autonomous racing problem. The controller drives several laps on race track and it learns from experience how to drive faster.
 
@@ -7,33 +7,22 @@ The Learning Model Predictive Control (LMPC) is a data-driven control framework 
 <img src="https://github.com/urosolia/RacingLMPC/blob/master/src/ClosedLoop_multiLap.gif" width="500" />
 </p>
 
-In the above animation we see the vehicle's closed-loop trajectory (in black) for laps 5, 30, 31 and 32. At each time instant the LMPC leverages forecast to plan the vehicle trajectory (in red) few seconds into the future. This trajectory is planned to minimize the lap time, but it is constrained to land into the safe set (in green). This safe set is the domain of the approximation to the value function and it is updated after each lap using historical data.
+### Abstract 
 
-### Prerequisites
-
-The packeges needed for running the code can be installed using pip
-
-```
-pip install cvxopt
-pip install osqp
-pip install pathos
-```
-
-## Description
-
-### The Plant
-The vehicle is modelled using the dynamics signle track bicycle model and the tire forces are modelled using the Pacejka formula.
-
-### The Path Following
-1) Lap 1: a PID path following controller is used to drive the vehicle around the track.
-2) Lap 2: the data from lap 1 are used to estimate a LTI model used to design a MPC for path following
-3) Lap 3: the data from lap 1 are used to estimate a LTV model used to design a MPC for path following
-
-
-## References
-
-This code is based on the following:
-
-* Ugo Rosolia and Francesco Borrelli. "Learning Model Predictive Control for Iterative Tasks. A Data-Driven Control Framework." In IEEE Transactions on Automatic Control (2017). [PDF](https://ieeexplore.ieee.org/document/8039204/)
-* Ugo Rosolia and Francesco Borrelli. "Learning how to autonomously race a car: a predictive control approach." IEEE Transactions on Control Systems Technology (2019) [PDF](https://ieeexplore.ieee.org/abstract/document/8896988).
-* Ugo Rosolia and Francesco Borrelli. "Learning Model Predictive Control for Iterative Tasks: A Computationally Efficient Approach for Linear System." IFAC-PapersOnLine 50.1 (2017). [PDF](https://arxiv.org/pdf/1702.07064.pdf)
+Autonomous racing presents an extreme and highly dynamic control environment in which a vehicle
+must not only operate at the limits of conditions like tire friction and external force handling capabilities,
+but must also do so repeatedly and reliably across multiple laps. This creates a unique opportunity for
+learning-based controllers to leverage past experiences in order to progressively refine performance. In
+particular, Learning Model Predictive Control (LMPC) has emerged as a promising iterative framework
+in which past closed-loop trajectories contribute to a safe set and cost-to-go approximation, enabling
+increasingly optimized future behavior. The success of LMPC critically depends on accurate vehicle
+dynamics prediction, which can be achieved through data-driven machine learning models trained on
+racing trajectory data.
+This project presents a comprehensive benchmarking study of MPC with three machine learning
+models; K-Fold Random Forests, Gaussian Process Regression, and Neural Networks for predicting
+vehicle dynamics in autonomous racing contexts. The primary objective is to evaluate which approach
+provides the most reliable predictions of critical vehicle state variables (longitudinal velocity, lateral
+velocity, yaw rate, heading error, track progress, and lateral deviation). All models are trained and
+evaluated on a 2,997-sample dataset generated from a three-phase data collection protocol combining
+PID control, Model Predictive Control, and Time-Varying MPC trajectories. To assess generalization
+robustness, experiments are conducted across multiple train-test splits with statistical validation.
