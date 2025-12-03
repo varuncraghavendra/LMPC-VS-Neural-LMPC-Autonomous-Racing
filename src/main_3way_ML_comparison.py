@@ -1,5 +1,5 @@
 # ----------------------------------------------------------------------------------------------------------------------
-# FAIR THREE-WAY ML COMPARISON - FIXED
+# THREE-WAY ML COMPARISON 
 # ----------------------------------------------------------------------------------------------------------------------
 import sys
 sys.path.append('fnc/simulator')
@@ -110,17 +110,17 @@ def main():
     print("TRAINING ALL THREE ML MODELS")
     print("="*100 + "\n")
     
-    print("1️⃣ Neural Network...")
+    print("1 Neural Network...")
     print("-" * 80)
     nn_predictor.train(epochs=200, batch_size=128, verbose=True)
     nn_predictor.save_model("models/nn_improved.pth")
     
-    print("\n2️⃣ K-Fold...")
+    print("\n 2 K-Fold...")
     print("-" * 80)
     kfold_predictor.train(verbose=True)
     kfold_predictor.save_model("models/kfold_improved.pkl")
     
-    print("3️⃣ Gaussian Process...")
+    print("3 Gaussian Process...")
     print("-" * 80)
     gp_predictor.train(verbose=True, use_subset=True, max_samples=1500)
     gp_predictor.save_model("models/gp_improved.pkl")
@@ -182,7 +182,7 @@ def main():
     
     methods = {'NN': overall_nn, 'K-Fold': overall_kfold, 'GP': overall_gp}
     winner = min(methods, key=methods.get)
-    print(f"🏆 WINNER: {winner}\n")
+    print(f" WINNER: {winner}\n")
     
     if imp_gp > 60:
         print("⚠ GP >60% may indicate overfitting on deterministic data\n")
@@ -281,7 +281,7 @@ def main():
     print(f"│ Gaussian Proc│ {overall_gp:.6f}   │   {imp_gp:+6.1f}%    │")
     print("└──────────────┴─────────────┴──────────────┘\n")
     
-    print(f"🏆 Best: {winner}\n")
+    print(f" Best: {winner}\n")
     print("="*100 + "\n")
     
     plt.show()
